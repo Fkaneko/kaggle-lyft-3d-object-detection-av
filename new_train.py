@@ -3,6 +3,8 @@
 
 import argparse
 import json
+from random import sample
+
 from make_image import transform_points
 import os
 import sys
@@ -21,25 +23,15 @@ from torch.utils.data import DataLoader
 
 import lyft_3d_utils
 from lyft_3d_utils import (
-    BEV_TARGET_SUFFIX, BEV_TRAIN_SUFFIX, CLASSES,
+    BEV_TARGET_SUFFIX,
+    BEV_TRAIN_SUFFIX,
+    CLASSES,
     CLASS_LOSS_WEIGHTS,
     INPUT_META_JSON_NAME,
     BEVImageDataset,
     SEED,
     SampleMeta,
 )
-
-ALL_DATA_SIZE = 198474478
-VAL_INTERVAL_SAMPLES = 250000
-CFG_PATH = "./agent_motion_config.yaml"
-
-# for using the same sampling as test dataset agents,
-# these two FRAME settings are required.
-# minimum number of frames an agents must have in the past to be picked
-MIN_FRAME_HISTORY = 0
-# minimum number of frames an agents must have in the future to be picked
-MIN_FRAME_FUTURE = 10
-VAL_SELECTED_FRAME = (99,)
 
 # output path for test mode
 CSV_PATH = "./submission.csv"
@@ -100,6 +92,7 @@ class Lyft3DdetSegDatamodule(pl.LightningDataModule):
         self.val_hosts = val_hosts
         self._img_mean = img_mean
         self._img_std = img_std
+        self.input_size = 320
 
     def prepare_data(self):
         # check
@@ -164,6 +157,7 @@ class Lyft3DdetSegDatamodule(pl.LightningDataModule):
     def setup(self, stage: Optional[str] = None):
         # Assign Train/val split(s) for use in Dataloaders
         self.bev_config = OmegaConf.load(Path(self.bev_data_dir, "config.yaml"))
+        self.bev_config.bev_data_dir = str(self.bev_data_dir)
 
         if stage == "fit" or stage is None:
             prefix = "train"
@@ -230,40 +224,44 @@ class Lyft3DdetSegDatamodule(pl.LightningDataModule):
             # albu.VerticalFlip(p=0.5),
             # albu.RandomRotate90(p=1),
             # albu.Transpose(p=0.5),
+            albu.Resize(self.input_size, self.input_size, p=1.0),
             albu.Normalize(mean=self._img_mean, std=self._img_std),
         ]
-        return transforms
+        return albu.Compose(transforms)
 
     def val_transform(self):
         transforms = [
+            albu.Resize(self.input_size, self.input_size, p=1.0),
             albu.Normalize(mean=self._img_mean, std=self._img_std),
         ]
-        return transforms
+        return albu.Compose(transforms)
 
     def test_transform(self):
         transforms = [
+            albu.Resize(self.input_size, self.input_size, p=1.0),
             albu.Normalize(mean=self._img_mean, std=self._img_std),
         ]
-        return transforms
+        return albu.Compose(transforms)
 
     def plot_dataset(
         self,
         dataset: BEVImageDataset,
         plot_num: int = 10,
     ) -> None:
-        for i in range(plot_num):
+        inds = np.random.choice(len(dataset), plot_num)
+        for i in inds:
             plt.figure(figsize=(16, 8))
             data = dataset[i]
             im = data["image"][:3, :, :].numpy().transpose(1, 2, 0)
             im = im * np.array(self._img_std) + np.array(self._img_mean)
-            target_as_rgb = data["target"].numpy()
-            target_as_rgb = target_as_rgb.transpose(1, 2, 0) / 255.0
+            target_as_rgb = data["target"].numpy().clip(0.0, 1.0)
+            target_as_rgb = np.repeat(target_as_rgb[:, :, np.newaxis], 3, axis=-1)
             if self.use_map:
                 im_map = data["image"][-3:, :, :].numpy().transpose(1, 2, 0)
                 im_map = im_map * np.array(self._img_std) + np.array(self._img_mean)
                 plt.imshow(np.hstack((im, im_map, target_as_rgb)))
             else:
-                plt.imshow(np.hstack((im.transpose, target_as_rgb)))
+                plt.imshow(np.hstack((im, target_as_rgb)))
             plt.title(data["sample_token"])
             if self.is_debug:
                 plt.show()
@@ -286,11 +284,11 @@ class LitModel(pl.LightningModule):
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
-        self.model = smp.Unet(
+        self.model = smp.FPN(
             encoder_name=backbone_name,
             encoder_weights="imagenet",
             in_channels=in_channels,
-            classes=len(CLASSES),
+            classes=len(CLASSES) + 1,
         )
         self.criterion = torch.nn.CrossEntropyLoss(torch.tensor(class_weights))
 
@@ -299,6 +297,7 @@ class LitModel(pl.LightningModule):
         self.kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE, (self.morph_kernel_size, self.morph_kernel_size)
         )
+        self.f1 = pl.metrics.F1(num_classes=len(CLASSES) + 1)
 
     def forward(self, x):
         x = self.model(x)
@@ -309,8 +308,14 @@ class LitModel(pl.LightningModule):
         targets = batch["target"]
 
         outputs = self.model(inputs)
-        loss = self.criterion(targets, outputs)
-        self.log("train_loss", loss)
+        loss = self.criterion(outputs, targets)
+        self.log("train_loss", loss, on_step=True, on_epoch=True)
+        self.log(
+            "train_f1",
+            self.f1(outputs.softmax(dim=1), targets),
+            on_step=True,
+            on_epoch=True,
+        )
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -318,8 +323,9 @@ class LitModel(pl.LightningModule):
         targets = batch["target"]
 
         outputs = self.model(inputs)
-        loss = self.criterion(targets, outputs)
+        loss = self.criterion(outputs, targets)
         self.log("val_loss", loss)
+        self.log("val_f1", self.f1(outputs.softmax(dim=1), targets))
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -333,96 +339,109 @@ class LitModel(pl.LightningModule):
         global_from_voxel = batch["global_from_voxel"].numpy()
         ego_pose = batch["ego_pose"].numpy()
 
-        detection_boxes = []
+        detection_dimensions = []
+        detection_centers = []
         detection_scores = []
         detection_classes = []
         for i, raw_pred in enumerate(predictions):
             raw_pred = cv2.resize(
                 raw_pred,
-                dsize=(self.bev_config.image_size, self.bev_config.image_size),
+                dsize=(
+                    self.hparams.bev_config.image_size,
+                    self.hparams.bev_config.image_size,
+                ),
                 interpolation=cv2.INTER_LINEAR,
             )
-            bkg_probability = 255 - raw_pred[:, :, 0]  # [336, 336]
             # [336, 336]
-
+            bkg_probability = 255 - raw_pred[:, :, 0]
             thresholded_p = (bkg_probability > self.background_threshold).astype(
                 np.uint8
             )
             predictions_opened = cv2.morphologyEx(
                 thresholded_p, cv2.MORPH_OPEN, self.kernel
             )
-            # get all boxes in this sample.
+            # get all 2D boxes from predicted image
             (
                 sample_boxes,
                 sample_detection_scores,
                 sample_detection_classes,
             ) = calc_detection_box(predictions_opened, raw_pred, CLASSES)
+
             # store the all boxes on the list
-            detection_boxes.append(np.array(sample_boxes))
+            (
+                sample_boxes_centers,
+                sample_boxes_dimensions,
+            ) = self.create_3d_boxes_from_2d(
+                np.array(sample_boxes),
+                sample_detection_scores,
+                sample_detection_classes,
+                ego_pose,
+                global_from_voxel,
+            )
+            detection_centers.append(sample_boxes_centers)
+            detection_dimensions.append(sample_boxes_dimensions)
             detection_scores.append(sample_detection_scores)
             detection_classes.append(sample_detection_classes)
-            # self.create_3d_boxes_from_2d()
-
         return {
             "sample_token": batch["sample_token"],
-            "detection_boxes": detection_boxes,
+            "boxes_centers": detection_centers,
+            "boxes_dimenstions": detection_dimensions,
             "detection_scores": detection_scores,
             "detection_classes": detection_classes,
-            "global_from_voxel": batch["global_from_voxel"],
         }
 
-    # def create_3d_boxes_from_2d(
-    #     self,
-    #     sample_boxes,
-    #     sample_detection_classes,
-    #     ego_pose,
-    #     global_from_voxel,
-    #     box_scale: float = 0.8,
-    # ):
-    #     # make json pred
-    #     sample_boxes = sample_boxes.reshape(-1, 2)  # (N, 4, 2) -> (N*4, 2)
-    #     sample_boxes = sample_boxes.transpose(1, 0)  # (N*4, 2) -> (2, N*4)
-    #     # Add Z dimension,  (2, N*4) -> (3, N*4)
-    #     sample_boxes = np.vstack((sample_boxes, np.zeros(sample_boxes.shape[1])))
-    #     # Transform box cordinate into global (3, N*4)
-    #     sample_boxes = transform_points(sample_boxes, global_from_voxel)
+    def create_3d_boxes_from_2d(
+        self,
+        sample_boxes,
+        sample_detection_classes,
+        ego_pose,
+        global_from_voxel,
+        box_scale: float = 0.8,
+    ):
+        # make json pred
+        sample_boxes = sample_boxes.reshape(-1, 2)  # (N, 4, 2) -> (N*4, 2)
+        sample_boxes = sample_boxes.transpose(1, 0)  # (N*4, 2) -> (2, N*4)
+        # Add Z dimension,  (2, N*4) -> (3, N*4)
+        sample_boxes = np.vstack((sample_boxes, np.zeros(sample_boxes.shape[1])))
+        # Transform box cordinate into global (3, N*4)
+        sample_boxes = transform_points(sample_boxes, global_from_voxel)
 
-    #     # We don't know at where the boxes are in the scene on the z-axis (up-down), let's assume all of them are at
-    #     # the same height as the ego vehicle.
-    #     sample_boxes[2, :] = ego_pose["translation"][2]
-    #     # (3, N*4) -> (N, 4, 3)
-    #     sample_boxes = sample_boxes.transpose(1, 0).reshape(-1, 4, 3)
+        # We don't know at where the boxes are in the scene on the z-axis (up-down), let's assume all of them are at
+        # the same height as the ego vehicle.
+        sample_boxes[2, :] = ego_pose["translation"][2]
+        # (3, N*4) -> (N, 4, 3)
+        sample_boxes = sample_boxes.transpose(1, 0).reshape(-1, 4, 3)
 
-    #     # We don't know the height of our boxes, let's assume every object is the same height.
-    #     # box_height = 1.75
-    #     box_height = np.array(
-    #         [CLASS_AVG_HEIGHTS[cls_] for cls_ in sample_detection_classes]
-    #     )
+        # We don't know the height of our boxes, let's assume every object is the same height.
+        # box_height = 1.75
+        box_height = np.array(
+            [CLASS_AVG_HEIGHTS[cls_] for cls_ in sample_detection_classes]
+        )
 
-    #     # Note: Each of these boxes describes the ground corners of a 3D box.
-    #     # To get the center of the box in 3D, we'll have to add half the height to it.
-    #     sample_boxes_centers = sample_boxes.mean(axis=1)  # (N, 3)
-    #     sample_boxes_centers[:, 2] += box_height / 2
+        # Note: Each of these boxes describes the ground corners of a 3D box.
+        # To get the center of the box in 3D, we'll have to add half the height to it.
+        sample_boxes_centers = sample_boxes.mean(axis=1)  # (N, 3)
+        sample_boxes_centers[:, 2] += box_height / 2
 
-    #     # Width and height is arbitrary - we don't know what way the vehicles are pointing from our prediction segmentation
-    #     # It doesn't matter for evaluation, so no need to worry about that here.
-    #     # Note: We scaled our targets to be 0.8 the actual size, we need to adjust for that
-    #     sample_lengths = (
-    #         np.linalg.norm(sample_boxes[:, 0, :] - sample_boxes[:, 1, :], axis=1)
-    #         * 1
-    #         / box_scale
-    #     )  # N
-    #     sample_widths = (
-    #         np.linalg.norm(sample_boxes[:, 1, :] - sample_boxes[:, 2, :], axis=1)
-    #         * 1
-    #         / box_scale
-    #     )  # N
+        # Width and height is arbitrary - we don't know what way the vehicles are pointing from our prediction segmentation
+        # It doesn't matter for evaluation, so no need to worry about that here.
+        # Note: We scaled our targets to be 0.8 the actual size, we need to adjust for that
+        sample_lengths = (
+            np.linalg.norm(sample_boxes[:, 0, :] - sample_boxes[:, 1, :], axis=1)
+            * 1
+            / box_scale
+        )  # N
+        sample_widths = (
+            np.linalg.norm(sample_boxes[:, 1, :] - sample_boxes[:, 2, :], axis=1)
+            * 1
+            / box_scale
+        )  # N
 
-    #     sample_boxes_dimensions = np.zeros_like(sample_boxes_centers)  # (N, 3)
-    #     sample_boxes_dimensions[:, 0] = sample_widths
-    #     sample_boxes_dimensions[:, 1] = sample_lengths
-    #     sample_boxes_dimensions[:, 2] = box_height
-    #     return sample_boxes_dimensions
+        sample_boxes_dimensions = np.zeros_like(sample_boxes_centers)  # (N, 3)
+        sample_boxes_dimensions[:, 0] = sample_widths
+        sample_boxes_dimensions[:, 1] = sample_lengths
+        sample_boxes_dimensions[:, 2] = box_height
+        return sample_boxes_centers, sample_boxes_dimensions
 
     # def writing_each_3d_box(self):
     #     for i in range(len(sample_boxes)):
@@ -488,12 +507,12 @@ class LitModel(pl.LightningModule):
             optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
         else:
             raise NotImplementedError
-        steps_per_epochs = self.hparams.dataset_len // self.hparams.ba_size
+        steps_per_epoch = self.hparams.dataset_len // self.hparams.ba_size
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer,
             max_lr=self.hparams.lr,
             epochs=self.hparams.epochs,
-            step_per_epochs=steps_per_epochs,
+            steps_per_epoch=steps_per_epoch,
         )
         return [optimizer], [scheduler]
 
@@ -504,9 +523,9 @@ def main(args: argparse.Namespace) -> None:
     os.environ["CUDA_VISIBLE_DEVICES"] = args.visible_gpus
 
     # ===== Configure LYFT dataset
-    # mypy error due to pl.DataModule.transfer_batch_to_device
     val_hosts = lyft_3d_utils.get_val_hosts(args.val_hosts)
 
+    # mypy error due to pl.DataModule.transfer_batch_to_device
     det_dm = Lyft3DdetSegDatamodule(  # type: ignore[abstract]
         args.bev_data_dir,
         val_hosts=val_hosts,
@@ -593,9 +612,9 @@ if __name__ == "__main__":
         default="sgd",
         help="optimizer name",
     )
-    parser.add_argument("--lr", default=7.0e-4, type=float, help="learning rate")
-    parser.add_argument("--batch_size", type=int, default=220, help="batch size")
-    parser.add_argument("--epochs", type=int, default=1, help="epochs for training")
+    parser.add_argument("--lr", default=2.0e-4, type=float, help="learning rate")
+    parser.add_argument("--batch_size", type=int, default=80, help="batch size")
+    parser.add_argument("--epochs", type=int, default=15, help="epochs for training")
     parser.add_argument(
         "--backbone_name",
         choices=["efficientnet-b1", "seresnext26d_32x4d"],

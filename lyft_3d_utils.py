@@ -4,8 +4,9 @@ import random
 from argparse import Namespace
 from pathlib import Path
 from pprint import pprint
-from typing import Dict, List, Optional, Tuple, Union, NamedTuple
+from typing import Dict, List, NamedTuple, Optional, Tuple, Union
 
+import albumentations as albu
 import cv2
 import numpy as np
 import torch
@@ -228,8 +229,8 @@ class BEVImageDataset(torch.utils.data.Dataset):
         input_filepaths: List[Path],
         input_meta_dict: Dict[str, SampleMeta],
         target_filepaths: Optional[List[Path]],
+        transforms: albu.core.composition.Compose,
         map_filepaths: Optional[List[Path]] = None,
-        transforms=None,
         multi_channel_filepaths: Optional[List] = None,
     ) -> None:
         self.input_filepaths = input_filepaths
@@ -250,7 +251,7 @@ class BEVImageDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx: int) -> dict:
         input_filepath = self.input_filepaths[idx]
 
-        sample_token = input_filepath.name.replace("_input_0.png", "")
+        sample_token = input_filepath.name.replace(f"_{BEV_TRAIN_SUFFIX}.png", "")
         input_meta = self.input_meta_dict[sample_token]
 
         if self.multi_channel_filepaths is not None:
@@ -268,26 +269,27 @@ class BEVImageDataset(torch.utils.data.Dataset):
         if self.map_filepaths is not None:
             map_filepath = self.map_filepaths[idx]
             map_im = cv2.cvtColor(
-                cv2.imread(map_filepath, cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB
+                cv2.imread(str(map_filepath), cv2.IMREAD_UNCHANGED), cv2.COLOR_BGR2RGB
             )
             im = np.concatenate((im, map_im), axis=2)
 
-        if self.test_mode:
+        if self.target_filepaths is None:
             target = None
         else:
             target_filepath = self.target_filepaths[idx]
             # target is grey image
-            target = cv2.imread(target_filepath, cv2.IMREAD_UNCHANGED)
-            target = target.astype(np.int64)
+            target = cv2.imread(str(target_filepath), cv2.IMREAD_UNCHANGED)
 
         if self.transforms:
             augmented = self.transforms(image=im, mask=target)
             im = augmented["image"]
             if not self.test_mode:
                 target = augmented["mask"]
+                target = target.astype(np.int64)
 
-        if not self.test_mode:
+        if self.target_filepaths is not None:
             target = torch.from_numpy(target)
+
         im = torch.from_numpy(im.transpose(2, 0, 1))
         return {
             "image": im,
@@ -296,3 +298,78 @@ class BEVImageDataset(torch.utils.data.Dataset):
             "global_from_voxel": torch.tensor(input_meta.global_from_voxel),
             "ego_pose": input_meta.ego_pose,
         }
+
+
+def visualize_predictions(
+    input_image,
+    prediction,
+    target=None,
+    n_images=2,
+    save_fig_path=None,
+    display_images=False,
+    background_threshold=122,
+):
+    """
+    Takes as input 3 PyTorch tensors, plots the input image, predictions and targets.
+    You can interpret the above visualizations as follows:
+    There are four different visualizations stacked on top of eachother:
+    1. The top images have two color channels: red for predictions, green for targets, with red+green=yellow. In other words:
+    > **Black**: True Negative
+    **Green**: False Negative
+    **Yellow**: True Positive
+    **Red**: False Positive
+    2. The input image
+    3. The input image or semantic input map blended together with targets+predictions
+    4. The predictions thresholded at 0.5 probability.
+    """
+    # Only select the first n images
+    prediction = prediction[:n_images]
+
+    # if test_mode:
+    #     target = prediction[:n_images]
+    # else:
+    #     target = target[:n_images]
+    target = target[:n_images]
+    input_image = input_image[:n_images]
+
+    # target: (batch_size, H, W) -> (H, W*batch_size)
+    # prediction: (batch_size, 10, H, W) -> (batch_size, H, W) -> (H, W*batch_size)
+    prediction = prediction.detach().cpu().numpy()
+
+    target = target.detach().cpu().numpy()
+    non_bkg = 1 - prediction[:, 0]
+    # "car" prob and batch direction is stacked horizontally on the last axis
+    class_one_preds = non_bkg
+
+    # (H, W*batch_size) -> (H, W*batch_size, 3)
+    class_rgb = np.repeat(class_one_preds[..., None], 3, axis=2)
+    class_rgb[..., 2] = 0
+    class_rgb[..., 1] = target
+
+    # (batch_size, 6, H, W) -> (6, H, W*batch_size) -> (H, W*batch_size, 6)
+    input_im = np.hstack(input_image.cpu().numpy().transpose(0, 2, 3, 1))
+
+    if input_im.shape[2] == 3:  # Without semantic map input
+        input_im_grayscale = np.repeat(input_im.mean(axis=2)[..., None], 3, axis=2)
+        overlayed_im = (input_im_grayscale * 0.6 + class_rgb * 0.7).clip(0, 1)
+    else:
+        input_map = input_im[..., -3:]  # With semantic map input
+        overlayed_im = (input_map * 0.6 + class_rgb * 0.7).clip(0, 1)
+
+    thresholded_pred = np.repeat(
+        class_one_preds[..., None] > background_threshold / 255.0, 3, axis=2
+    )
+
+    fig = plt.figure(figsize=(12, 26))
+    plot_im = (
+        np.vstack([class_rgb, input_im[..., :3], overlayed_im, thresholded_pred])
+        .clip(0, 1)
+        .astype(np.float32)
+    )
+    plt.imshow(plot_im)
+    plt.axis("off")
+    if save_fig_path:
+        plt.savefig(save_fig_path, dpi=300)
+    if display_images:
+        plt.show()
+    plt.close()
