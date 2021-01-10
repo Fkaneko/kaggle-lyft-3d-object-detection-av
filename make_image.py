@@ -244,11 +244,10 @@ def create_voxel_pointcloud(
 
 
 def normalize_voxel_intensities(bev: np.ndarray, max_intensity: int = 16) -> np.ndarray:
-    # TODO: INPUT-VOXEL, max_intensity tune
     return (bev / max_intensity).clip(0, 1)
 
 
-def move_boxes_to_car_space(boxes, ego_pose):
+def move_boxes_to_car_space(boxes, ego_pose) -> None:
     """
     Move boxes from world space to car space.
     Note: mutates input boxes.
@@ -260,10 +259,9 @@ def move_boxes_to_car_space(boxes, ego_pose):
         # Bring box to car space
         box.translate(translation)
         box.rotate(rotation)
-        return None
 
 
-def scale_boxes(boxes, factor):
+def scale_boxes(boxes, factor) -> None:
     """
     Note: mutates input boxes
     """
@@ -305,12 +303,13 @@ def prepare_training_data_for_scene(
     output_folder: Path,
     map_mask: np.ndarray,
     test_mode: bool,
+    debug_mode: bool,
     bev_shape: Tuple[int, int, int] = (336, 336, 3),
     voxel_size: Tuple[float, float, float] = (0.4, 0.4, 1.5),
     z_offset: float = -2.0,
     box_scale: float = 0.8,
     max_intensity: int = 16,
-) -> None:
+) -> Tuple[List[SampleMeta], List[Box3D]]:
     """
     Given a first sample token (in a scene), output rasterized input volumes and
     targets in birds-eye-view perspective.
@@ -385,6 +384,11 @@ def prepare_training_data_for_scene(
         sample_meta_data.append(
             SampleMeta(sample_token, host, ego_pose, global_from_voxel)
         )
+        if debug_mode:
+            plt.figure(figsize=(16, 8))
+            plt.imshow(np.hstack((bev_im, semantic_im)))
+            plt.show()
+            plt.close()
 
         # extract annotation and create bev tareget
         if not test_mode:
@@ -412,21 +416,21 @@ def prepare_training_data_for_scene(
                 ),
                 target[:, :, 0],
             )
+            if debug_mode:
+                plt.figure(figsize=(8, 8))
+                plt.imshow((target[:, :, 0] > 0).astype(np.float32), cmap="Set2")
+                plt.show()
+                # These are the annotations in the same top-down frame, Below we plot
+                # the same scene using the NuScenes SDK. Don't worry about it being
+                # flipped.
+                plt.close()
+                level5data.render_sample_data(sample_lidar_token, axes_limit=80)
             # for mAP evaluation
             gt_box3ds.extend(make_gt_boxes_from_sample(level5data, sample_token))
 
         sample_token = sample["next"]
 
-    # making input meta json for training
-    sample_meta = [meta_._asdict() for meta_ in sample_meta_data]
-    with open(Path(output_folder, INPUT_META_JSON_NAME), "a") as f:
-        json.dump(sample_meta, f)
-
-    if not test_mode:
-        # making ground truth json file for mAP evaluation
-        gt = [b.serialize() for b in gt_box3ds]
-        with open(Path(output_folder, GT_JSON_NAME), "a") as f:
-            json.dump(gt, f)
+    return sample_meta_data, gt_box3ds
 
 
 class Lyft3dFolderConfigure:
@@ -534,23 +538,39 @@ def main(args):
         )
         first_samples = df.first_sample_token.values
         hosts = df.host.values
+        sample_meta: List = []
+        gt: List = []
         for i in tqdm(range(first_samples.shape[0])):
-            prepare_training_data_for_scene(
+            sample_meta_data, gt_box3ds = prepare_training_data_for_scene(
                 first_samples[i],
                 hosts[i],
                 level5data=level5data,
                 output_folder=data_folder,
+                test_mode=args.test_mode,
+                debug_mode=args.debug_mode,
                 bev_shape=bev_shape,
                 map_mask=map_mask,
                 voxel_size=voxel_size,
                 z_offset=z_offset,
                 box_scale=box_scale,
                 max_intensity=args.max_intensity,
-                test_mode=args.test_mode,
             )
             if args.debug_mode:
-                if i > 10:
+                if i > 5:
                     break
+            sample_meta.extend(sample_meta_data)
+            gt.extend(gt_box3ds)
+
+        # making input meta json for training
+        sample_meta = [meta_._asdict() for meta_ in sample_meta]
+        with open(Path(data_folder, INPUT_META_JSON_NAME), "w") as f:
+            json.dump(sample_meta, f)
+
+        if not args.test_mode:
+            # making ground truth json file for mAP evaluation
+            gt = [b.serialize() for b in gt]
+            with open(Path(data_folder, GT_JSON_NAME), "w") as f:
+                json.dump(gt, f)
 
         # process_func = partial(
         #     prepare_training_data_for_scene,
@@ -661,12 +681,4 @@ if __name__ == "__main__":
         help="number of data loading workers",
     )
     args = parser.parse_args()
-    # args = parser.parse_args(
-    #     [
-    #         "--dataset_root_dir",
-    #         "/home/fkaneko-one/kaggle/data/lyft_3d_det/",
-    #         "--debug_mode",
-    #     ]
-    # )
-
     main(args)
