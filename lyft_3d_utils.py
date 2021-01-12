@@ -9,6 +9,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple, Union
 import albumentations as albu
 import cv2
 import numpy as np
+import matplotlib.pyplot as plt
 import torch
 from omegaconf import OmegaConf
 
@@ -301,12 +302,10 @@ class BEVImageDataset(torch.utils.data.Dataset):
 
 
 def visualize_predictions(
-    input_image,
-    prediction,
-    target=None,
-    n_images=2,
-    save_fig_path=None,
-    display_images=False,
+    input_image: torch.Tensor,
+    prediction: torch.Tensor,
+    target: torch.Tensor = None,
+    n_images: int = 2,
     background_threshold=122,
 ):
     """
@@ -337,10 +336,8 @@ def visualize_predictions(
     prediction = prediction.detach().cpu().numpy()
 
     target = target.detach().cpu().numpy()
-    non_bkg = 1 - prediction[:, 0]
     # "car" prob and batch direction is stacked horizontally on the last axis
-    class_one_preds = non_bkg
-
+    class_one_preds = 1 - prediction[:, 0]
     # (H, W*batch_size) -> (H, W*batch_size, 3)
     class_rgb = np.repeat(class_one_preds[..., None], 3, axis=2)
     class_rgb[..., 2] = 0
@@ -368,8 +365,4 @@ def visualize_predictions(
     )
     plt.imshow(plot_im)
     plt.axis("off")
-    if save_fig_path:
-        plt.savefig(save_fig_path, dpi=300)
-    if display_images:
-        plt.show()
-    plt.close()
+    return fig

@@ -5,6 +5,8 @@ import argparse
 import json
 from random import sample
 
+from torch._C import int64
+
 from make_image import transform_points
 import os
 import sys
@@ -325,7 +327,31 @@ class LitModel(pl.LightningModule):
         outputs = self.model(inputs)
         loss = self.criterion(outputs, targets)
         self.log("val_loss", loss)
-        self.log("val_f1", self.f1(outputs.softmax(dim=1), targets))
+        # self.log("val_f1", self.f1(1-outputs.softmax(dim=1)[:, 0], (targets > 0).type(torch.int64)))
+        # if batch_idx == 0 or batch_idx == 50:
+        if batch_idx == 0:
+            num_ = 2
+            class_one_preds = 1 - outputs.detach().softmax(dim=1)[:num_, 0]
+            # (num_, H, W) -> (num_, 3, H, W)
+            class_rgb = torch.repeat_interleave(class_one_preds[:, None], 3, dim=1)
+            class_rgb[:, 2] = 0
+            class_rgb[:, 1] = targets[:num_]
+            # (num_, 3, H, W) -> (3, H*num_, W)
+            class_rgb = torch.cat([class_rgb[i] for i in range(num_)], dim=1)
+            inputs_rgb = torch.cat([inputs[i] for i in range(num_)], dim=1)
+            # (3, H*num_, W)*2 -> (3, H*num_, W*2)
+            img = torch.cat((inputs_rgb, class_rgb), dim=2)
+            # img_ch = torch.cat((class_rgb[1], class_rgb[0]), dim=2)
+            self.logger.experiment.add_image(
+                "prediction",
+                img.type(torch.float32).cpu(),
+                global_step=self.global_step,
+            )
+            # self.logger.experiment.add_image(
+            #     "image_ch",
+            #     img_ch.type(torch.float32).cpu(),
+            #     global_step=self.global_step,
+            # )
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -584,9 +610,7 @@ def main(args: argparse.Namespace) -> None:
 
         # Run lr finder
         if args.find_lr:
-            lr_finder = trainer.tuner.lr_find(
-                model, datamodule=det_dm, num_training=500
-            )
+            lr_finder = trainer.tuner.lr_find(model, datamodule=det_dm)
             lr_finder.plot(suggest=True)
             plt.show()
             sys.exit()
@@ -609,12 +633,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--optim_name",
         choices=["adam", "sgd"],
-        default="sgd",
+        default="adam",
         help="optimizer name",
     )
-    parser.add_argument("--lr", default=2.0e-4, type=float, help="learning rate")
-    parser.add_argument("--batch_size", type=int, default=80, help="batch size")
-    parser.add_argument("--epochs", type=int, default=15, help="epochs for training")
+    parser.add_argument("--lr", default=3.0e-3, type=float, help="learning rate")
+    parser.add_argument("--batch_size", type=int, default=96, help="batch size")
+    parser.add_argument("--epochs", type=int, default=50, help="epochs for training")
     parser.add_argument(
         "--backbone_name",
         choices=["efficientnet-b1", "seresnext26d_32x4d"],

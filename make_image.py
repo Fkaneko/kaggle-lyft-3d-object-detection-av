@@ -501,7 +501,6 @@ def main(args):
     # this would mean every subprocess produces  even more threads which would lead
     # to a lot of context switching, slowing things down a lot.
     os.environ["OMP_NUM_THREADS"] = "1"
-    NUM_WORKERS = args.workers
 
     # Some hyperparameters we'll need to define for the system, to generate BEV
     # "bev" stands for birds eye view
@@ -531,11 +530,7 @@ def main(args):
     map_mask = level5data.map[0]["mask"]
 
     for data_folder, df in df_and_folder_list:
-        print(
-            "Generating bev from lidar 3d points into {} using {} workers".format(
-                data_folder, NUM_WORKERS
-            )
-        )
+        print("Generating bev from lidar 3d points into {}".format(data_folder))
         first_samples = df.first_sample_token.values
         hosts = df.host.values
         sample_meta: List = []
