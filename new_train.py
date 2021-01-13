@@ -5,7 +5,6 @@ import argparse
 import json
 from random import sample
 
-from torch._C import int64
 
 from make_image import transform_points
 import os
@@ -299,7 +298,8 @@ class LitModel(pl.LightningModule):
         self.kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE, (self.morph_kernel_size, self.morph_kernel_size)
         )
-        self.f1 = pl.metrics.F1(num_classes=len(CLASSES) + 1)
+        # self.f1 = pl.metrics.F1(num_classes=len(CLASSES) + 1)
+        self.f1 = pl.metrics.F1()
 
     def forward(self, x):
         x = self.model(x)
@@ -311,10 +311,11 @@ class LitModel(pl.LightningModule):
 
         outputs = self.model(inputs)
         loss = self.criterion(outputs, targets)
+        non_bkg_proba = 1 - outputs.softmax(dim=1)[:, 0]
         self.log("train_loss", loss, on_step=True, on_epoch=True)
         self.log(
             "train_f1",
-            self.f1(outputs.softmax(dim=1), targets),
+            self.f1(non_bkg_proba, (targets > 0).type(torch.int64)),
             on_step=True,
             on_epoch=True,
         )
@@ -327,13 +328,13 @@ class LitModel(pl.LightningModule):
         outputs = self.model(inputs)
         loss = self.criterion(outputs, targets)
         self.log("val_loss", loss)
-        # self.log("val_f1", self.f1(1-outputs.softmax(dim=1)[:, 0], (targets > 0).type(torch.int64)))
-        # if batch_idx == 0 or batch_idx == 50:
+        non_bkg_proba = 1 - outputs.softmax(dim=1)[:, 0]
+        self.log("val_f1", self.f1(non_bkg_proba, (targets > 0).type(torch.int64)))
         if batch_idx == 0:
             num_ = 2
-            class_one_preds = 1 - outputs.detach().softmax(dim=1)[:num_, 0]
+            non_bkg_proba = non_bkg_proba.detach()[:num_]
             # (num_, H, W) -> (num_, 3, H, W)
-            class_rgb = torch.repeat_interleave(class_one_preds[:, None], 3, dim=1)
+            class_rgb = torch.repeat_interleave(non_bkg_proba[:, None], 3, dim=1)
             class_rgb[:, 2] = 0
             class_rgb[:, 1] = targets[:num_]
             # (num_, 3, H, W) -> (3, H*num_, W)

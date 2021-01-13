@@ -90,7 +90,7 @@ INPUT_META_JSON_NAME = Path("bev_input_meta.json")
 # ground truth json name
 GT_JSON_NAME = Path("ground_truth_boxes.json")
 
-CLASS_LOSS_WEIGHTS = [0.4] + [1.0] * len(CLASSES)
+CLASS_LOSS_WEIGHTS = [0.1] + [1.0] * len(CLASSES)
 
 # random seed
 SEED = 42
