@@ -1,5 +1,4 @@
 import os
-import pickle
 import random
 from argparse import Namespace
 from pathlib import Path
@@ -148,21 +147,6 @@ def print_argparse_arguments(p, bar=50, log=None):
 #     return cfg
 
 
-def load_image_description_from_dict(args, save_dir):
-    with open(
-        os.path.join(os.path.join(save_dir, "image_description_dict.dump")), "rb"
-    ) as f:
-        image_description_dict = pickle.load(f)
-
-    args.voxel_size_xy = image_description_dict["voxel_size_xy"]
-    args.voxel_size_z = image_description_dict["voxel_size_z"]
-    args.image_size = image_description_dict["image_size"]
-    args.image_channel = image_description_dict["image_channel"]
-    args.z_offset = image_description_dict["z_offset"]
-    args.max_intensity = image_description_dict["max_intensity"]
-    args.box_scale = image_description_dict["box_scale"]
-
-
 def save_config_data(conf: Union[dict, Namespace], path: Path) -> None:
     # with fs.open(config_yaml, "w", encoding="utf-8") as fp:
     if isinstance(conf, Namespace):
@@ -301,68 +285,68 @@ class BEVImageDataset(torch.utils.data.Dataset):
         }
 
 
-def visualize_predictions(
-    input_image: torch.Tensor,
-    prediction: torch.Tensor,
-    target: torch.Tensor = None,
-    n_images: int = 2,
-    background_threshold=122,
-):
-    """
-    Takes as input 3 PyTorch tensors, plots the input image, predictions and targets.
-    You can interpret the above visualizations as follows:
-    There are four different visualizations stacked on top of eachother:
-    1. The top images have two color channels: red for predictions, green for targets, with red+green=yellow. In other words:
-    > **Black**: True Negative
-    **Green**: False Negative
-    **Yellow**: True Positive
-    **Red**: False Positive
-    2. The input image
-    3. The input image or semantic input map blended together with targets+predictions
-    4. The predictions thresholded at 0.5 probability.
-    """
-    # Only select the first n images
-    prediction = prediction[:n_images]
+# def visualize_predictions(
+#     input_image: torch.Tensor,
+#     prediction: torch.Tensor,
+#     target: torch.Tensor = None,
+#     n_images: int = 2,
+#     background_threshold=122,
+# ):
+#     """
+#     Takes as input 3 PyTorch tensors, plots the input image, predictions and targets.
+#     You can interpret the above visualizations as follows:
+#     There are four different visualizations stacked on top of eachother:
+#     1. The top images have two color channels: red for predictions, green for targets, with red+green=yellow. In other words:
+#     > **Black**: True Negative
+#     **Green**: False Negative
+#     **Yellow**: True Positive
+#     **Red**: False Positive
+#     2. The input image
+#     3. The input image or semantic input map blended together with targets+predictions
+#     4. The predictions thresholded at 0.5 probability.
+#     """
+#     # Only select the first n images
+#     prediction = prediction[:n_images]
 
-    # if test_mode:
-    #     target = prediction[:n_images]
-    # else:
-    #     target = target[:n_images]
-    target = target[:n_images]
-    input_image = input_image[:n_images]
+#     # if test_mode:
+#     #     target = prediction[:n_images]
+#     # else:
+#     #     target = target[:n_images]
+#     target = target[:n_images]
+#     input_image = input_image[:n_images]
 
-    # target: (batch_size, H, W) -> (H, W*batch_size)
-    # prediction: (batch_size, 10, H, W) -> (batch_size, H, W) -> (H, W*batch_size)
-    prediction = prediction.detach().cpu().numpy()
+#     # target: (batch_size, H, W) -> (H, W*batch_size)
+#     # prediction: (batch_size, 10, H, W) -> (batch_size, H, W) -> (H, W*batch_size)
+#     prediction = prediction.detach().cpu().numpy()
 
-    target = target.detach().cpu().numpy()
-    # "car" prob and batch direction is stacked horizontally on the last axis
-    class_one_preds = 1 - prediction[:, 0]
-    # (H, W*batch_size) -> (H, W*batch_size, 3)
-    class_rgb = np.repeat(class_one_preds[..., None], 3, axis=2)
-    class_rgb[..., 2] = 0
-    class_rgb[..., 1] = target
+#     target = target.detach().cpu().numpy()
+#     # "car" prob and batch direction is stacked horizontally on the last axis
+#     class_one_preds = 1 - prediction[:, 0]
+#     # (H, W*batch_size) -> (H, W*batch_size, 3)
+#     class_rgb = np.repeat(class_one_preds[..., None], 3, axis=2)
+#     class_rgb[..., 2] = 0
+#     class_rgb[..., 1] = target
 
-    # (batch_size, 6, H, W) -> (6, H, W*batch_size) -> (H, W*batch_size, 6)
-    input_im = np.hstack(input_image.cpu().numpy().transpose(0, 2, 3, 1))
+#     # (batch_size, 6, H, W) -> (6, H, W*batch_size) -> (H, W*batch_size, 6)
+#     input_im = np.hstack(input_image.cpu().numpy().transpose(0, 2, 3, 1))
 
-    if input_im.shape[2] == 3:  # Without semantic map input
-        input_im_grayscale = np.repeat(input_im.mean(axis=2)[..., None], 3, axis=2)
-        overlayed_im = (input_im_grayscale * 0.6 + class_rgb * 0.7).clip(0, 1)
-    else:
-        input_map = input_im[..., -3:]  # With semantic map input
-        overlayed_im = (input_map * 0.6 + class_rgb * 0.7).clip(0, 1)
+#     if input_im.shape[2] == 3:  # Without semantic map input
+#         input_im_grayscale = np.repeat(input_im.mean(axis=2)[..., None], 3, axis=2)
+#         overlayed_im = (input_im_grayscale * 0.6 + class_rgb * 0.7).clip(0, 1)
+#     else:
+#         input_map = input_im[..., -3:]  # With semantic map input
+#         overlayed_im = (input_map * 0.6 + class_rgb * 0.7).clip(0, 1)
 
-    thresholded_pred = np.repeat(
-        class_one_preds[..., None] > background_threshold / 255.0, 3, axis=2
-    )
+#     thresholded_pred = np.repeat(
+#         class_one_preds[..., None] > background_threshold / 255.0, 3, axis=2
+#     )
 
-    fig = plt.figure(figsize=(12, 26))
-    plot_im = (
-        np.vstack([class_rgb, input_im[..., :3], overlayed_im, thresholded_pred])
-        .clip(0, 1)
-        .astype(np.float32)
-    )
-    plt.imshow(plot_im)
-    plt.axis("off")
-    return fig
+#     fig = plt.figure(figsize=(12, 26))
+#     plot_im = (
+#         np.vstack([class_rgb, input_im[..., :3], overlayed_im, thresholded_pred])
+#         .clip(0, 1)
+#         .astype(np.float32)
+#     )
+#     plt.imshow(plot_im)
+#     plt.axis("off")
+#     return fig

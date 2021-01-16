@@ -61,7 +61,7 @@ class BEVImageDataset(torch.utils.data.Dataset):
             im = np.concatenate((im, map_im), axis=2)
 
         if self.target_filepaths is None:
-            target = None
+            target = np.zeros_like(im[:, :, 0], dtype=np.int64)
         else:
             target_filepath = self.target_filepaths[idx]
             # target is grey image
@@ -70,12 +70,10 @@ class BEVImageDataset(torch.utils.data.Dataset):
         if self.transforms:
             augmented = self.transforms(image=im, mask=target)
             im = augmented["image"]
-            if not self.test_mode:
-                target = augmented["mask"]
-                target = target.astype(np.int64)
+            target = augmented["mask"]
+            target = target.astype(np.int64)
 
-        if self.target_filepaths is not None:
-            target = torch.from_numpy(target)
+        target = torch.from_numpy(target)
 
         im = torch.from_numpy(im.transpose(2, 0, 1))
         return {
@@ -83,5 +81,6 @@ class BEVImageDataset(torch.utils.data.Dataset):
             "target": target,
             "sample_token": sample_token,
             "global_from_voxel": torch.tensor(input_meta.global_from_voxel),
-            "ego_pose": input_meta.ego_pose,
+            "ego_translation": torch.tensor(input_meta.ego_pose["translation"]),
+            "ego_rotation": torch.tensor(input_meta.ego_pose["rotation"]),
         }

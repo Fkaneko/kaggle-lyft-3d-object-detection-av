@@ -2,12 +2,13 @@
 # coding: utf-8
 import argparse
 import os
+from pathlib import Path
 import sys
 
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 
-from src.config.config import CSV_PATH, SEED
+from src.config.config import SEED
 from src.dataset.seg_datamodule import Lyft3DdetSegDatamodule
 from src.modeling.seg_pl_model import LitModel
 from src.utils.util import set_random_seed, print_argparse_arguments
@@ -33,14 +34,21 @@ def main(args: argparse.Namespace) -> None:
     if args.is_test:
         print("\t\t ==== TEST MODE ====")
         print("load from: ", args.ckpt_path)
-        model = LitModel.load_from_checkpoint(args.ckpt_path)
+        model = LitModel.load_from_checkpoint(
+            args.ckpt_path, output_dir=str(Path(args.ckpt_path).parent)
+        )
         trainer = pl.Trainer(gpus=len(args.visible_gpus.split(",")))
-        trainer.test(model, datamodule=det_dm)
 
-        test_gt_path = os.path.join(os.path.dirname(det_dm.test_path), "gt.csv")
-        if os.path.exists(test_gt_path):
-            print("test mode with validation chopped dataset, and check the metrics")
-            print("validation ground truth path: ", test_gt_path)
+        if args.test_with_val:
+            det_dm.setup(stage="fit")
+            trainer.test(model, test_dataloaders=det_dm.val_dataloader())
+        else:
+            trainer.test(model, datamodule=det_dm)
+
+        # test_gt_path = os.path.join(os.path.dirname(det_dm.test_path), "gt.csv")
+        # if os.path.exists(test_gt_path):
+        #     print("test mode with validation chopped dataset, and check the metrics")
+        #     print("validation ground truth path: ", test_gt_path)
 
     else:
         print("\t\t ==== TRAIN MODE ====")
@@ -121,6 +129,9 @@ if __name__ == "__main__":
         type=str,
         default="./model.pth",
         help="path for model checkpoint at test mode",
+    )
+    parser.add_argument(
+        "--test_with_val", action="store_true", help="test mode with validation data"
     )
     parser.add_argument(
         "--precision",

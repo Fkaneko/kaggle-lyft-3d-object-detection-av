@@ -1,17 +1,25 @@
-from src.dataset.seg_datamodule import IMG_MEAN, IMG_STD
+import json
+import os
+from pathlib import Path
 from typing import List, Tuple, Union
 
 import cv2
 import numpy as np
+import pandas as pd
 import pytorch_lightning as pl
 import segmentation_models_pytorch as smp
 import torch
-
-from make_image import transform_points
-from src.bev_processing.bev_to_3d import calc_detection_box
-from src.config.config import CLASS_AVG_HEIGHTS, CLASS_LOSS_WEIGHTS, CLASSES
 from omegaconf.dictconfig import DictConfig
 from omegaconf.listconfig import ListConfig
+from tqdm import tqdm
+
+from src.bev_processing.bev_to_3d import (
+    calc_detection_box,
+    convert_into_nuscene_3dbox,
+    create_3d_boxes_from_2d,
+)
+from src.config.config import CLASS_LOSS_WEIGHTS, CLASSES, CSV_NAME
+from src.dataset.seg_datamodule import IMG_MEAN, IMG_STD
 
 
 class LitModel(pl.LightningModule):
@@ -28,6 +36,7 @@ class LitModel(pl.LightningModule):
         epochs: int = 15,
         optim_name: str = "adam",
         in_channels: int = 3,
+        output_dir: str = "./",
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
@@ -115,13 +124,10 @@ class LitModel(pl.LightningModule):
         predictions = np.round(outputs.cpu().numpy() * 255).astype(np.uint8)
         predictions = np.transpose(predictions, (0, 2, 3, 1))
 
-        global_from_voxel = batch["global_from_voxel"].numpy()
-        ego_pose = batch["ego_pose"].numpy()
+        global_from_voxel = batch["global_from_voxel"].cpu().numpy()
+        ego_translation = batch["ego_translation"].cpu().numpy()
 
-        detection_dimensions = []
-        detection_centers = []
-        detection_scores = []
-        detection_classes = []
+        pred_box3ds = []
         for i, raw_pred in enumerate(predictions):
             raw_pred = cv2.resize(
                 raw_pred,
@@ -132,10 +138,9 @@ class LitModel(pl.LightningModule):
                 interpolation=cv2.INTER_LINEAR,
             )
             # [336, 336]
-            bkg_probability = 255 - raw_pred[:, :, 0]
-            thresholded_p = (bkg_probability > self.background_threshold).astype(
-                np.uint8
-            )
+            non_bkg_proba = 255 - raw_pred[:, :, 0]
+            thresholded_p = (non_bkg_proba > self.background_threshold).astype(np.uint8)
+
             predictions_opened = cv2.morphologyEx(
                 thresholded_p, cv2.MORPH_OPEN, self.kernel
             )
@@ -148,133 +153,75 @@ class LitModel(pl.LightningModule):
 
             # store the all boxes on the list
             (
+                sample_boxes,
                 sample_boxes_centers,
                 sample_boxes_dimensions,
-            ) = self.create_3d_boxes_from_2d(
+            ) = create_3d_boxes_from_2d(
                 np.array(sample_boxes),
                 sample_detection_classes,
-                ego_pose,
-                global_from_voxel,
+                ego_translation[i],
+                global_from_voxel[i],
                 box_scale=self.hparams.bev_config.box_scale,
             )
-            detection_centers.append(sample_boxes_centers)
-            detection_dimensions.append(sample_boxes_dimensions)
-            detection_scores.append(sample_detection_scores)
-            detection_classes.append(sample_detection_classes)
-        return {
-            "sample_token": batch["sample_token"],
-            "boxes_centers": detection_centers,
-            "boxes_dimenstions": detection_dimensions,
-            "detection_scores": detection_scores,
-            "detection_classes": detection_classes,
-        }
+            pred_box3ds.extend(
+                convert_into_nuscene_3dbox(
+                    batch["sample_token"][i],
+                    sample_boxes,
+                    sample_boxes_centers,
+                    sample_boxes_dimensions,
+                    sample_detection_classes,
+                    sample_detection_scores,
+                )
+            )
+        return pred_box3ds
 
-    def create_3d_boxes_from_2d(
-        self,
-        sample_boxes,
-        sample_detection_classes,
-        ego_pose,
-        global_from_voxel,
-        box_scale: float = 0.8,
-    ):
-        # make json pred
-        sample_boxes = sample_boxes.reshape(-1, 2)  # (N, 4, 2) -> (N*4, 2)
-        sample_boxes = sample_boxes.transpose(1, 0)  # (N*4, 2) -> (2, N*4)
-        # Add Z dimension,  (2, N*4) -> (3, N*4)
-        sample_boxes = np.vstack((sample_boxes, np.zeros(sample_boxes.shape[1])))
-        # Transform box cordinate into global (3, N*4)
-        sample_boxes = transform_points(sample_boxes, global_from_voxel)
-
-        # We don't know at where the boxes are in the scene on the z-axis (up-down),
-        # let's assume all of them are at the same height as the ego vehicle.
-        sample_boxes[2, :] = ego_pose["translation"][2]
-        # (3, N*4) -> (N, 4, 3)
-        sample_boxes = sample_boxes.transpose(1, 0).reshape(-1, 4, 3)
-
-        # We don't know the height of our boxes, let's assume every object is the same
-        # height.
-        # box_height = 1.75
-        box_height = np.array(
-            [CLASS_AVG_HEIGHTS[cls_] for cls_ in sample_detection_classes]
+    def test_epoch_end(self, outputs):
+        # convert into world coordinates and compute offsets
+        pred_box3ds = []
+        for boxes in outputs:
+            pred_box3ds.extend(boxes)
+        pred = [b.serialize() for b in pred_box3ds]
+        pred_json_path = os.path.join(
+            self.hparams.output_dir, CSV_NAME.replace(".csv", ".json")
         )
+        with open(pred_json_path, "w") as f:
+            json.dump(pred, f)
 
-        # Note: Each of these boxes describes the ground corners of a 3D box.
-        # To get the center of the box in 3D, we'll have to add half the height to it.
-        sample_boxes_centers = sample_boxes.mean(axis=1)  # (N, 3)
-        sample_boxes_centers[:, 2] += box_height / 2
+        sub = {}
+        for i in tqdm(range(len(pred_box3ds))):
+            yaw = 2 * np.arccos(pred_box3ds[i].rotation[0])
+            pred = " ".join(
+                [
+                    str(pred_box3ds[i].score / 255),
+                    str(pred_box3ds[i].center_x),
+                    str(pred_box3ds[i].center_y),
+                    str(pred_box3ds[i].center_z),
+                    str(pred_box3ds[i].width),
+                    str(pred_box3ds[i].length),
+                    str(pred_box3ds[i].height),
+                    str(yaw),
+                    str(pred_box3ds[i].name),
+                    " ",
+                ]
+            )[:-1]
+            if pred_box3ds[i].sample_token in sub.keys():
+                sub[pred_box3ds[i].sample_token] += pred
+            else:
+                sub[pred_box3ds[i].sample_token] = pred
 
-        # Width and height is arbitrary - we don't know what way the vehicles are
-        # pointing from our prediction segmentation It doesn't matter for evaluation,
-        # so no need to worry about that here. Note: We scaled our targets to be 0.8
-        # the actual size, we need to adjust for that
-        sample_lengths = (
-            np.linalg.norm(sample_boxes[:, 0, :] - sample_boxes[:, 1, :], axis=1)
-            * 1
-            / box_scale
-        )  # N
-        sample_widths = (
-            np.linalg.norm(sample_boxes[:, 1, :] - sample_boxes[:, 2, :], axis=1)
-            * 1
-            / box_scale
-        )  # N
+        sample_sub = pd.read_csv(
+            os.path.join(
+                self.hparams.bev_config.dataset_root_dir, "sample_submission.csv"
+            )
+        )
+        for token in set(sample_sub.Id.values).difference(sub.keys()):
+            sub[token] = ""
 
-        sample_boxes_dimensions = np.zeros_like(sample_boxes_centers)  # (N, 3)
-        sample_boxes_dimensions[:, 0] = sample_widths
-        sample_boxes_dimensions[:, 1] = sample_lengths
-        sample_boxes_dimensions[:, 2] = box_height
-        return sample_boxes_centers, sample_boxes_dimensions
-
-    # def writing_each_3d_box(self):
-    #     for i in range(len(sample_boxes)):
-    #         translation = sample_boxes_centers[i]
-    #         size = sample_boxes_dimensions[i]
-    #         class_name = sample_detection_class[i]
-
-    #         if args.width_len_average_set > 0:
-    #             if class_name in width_len_average_set:
-    #                 size[0] = class_widths[class_name]
-    #                 size[1] = class_lengths[class_name]
-
-    #         # Determine the rotation of the box
-    #         # TODO: OUTPUT-PREDICTION, only z axis rotaions are exist?
-    #         # TODO: OUTPUT-PREDICTION, yaw_deg consistent check <DONE>
-    #         v = sample_boxes[i, 0] - sample_boxes[i, 1]  # (3, )
-    #         v /= np.linalg.norm(v)
-    #         r = R.from_dcm(
-    #             [
-    #                 [v[0], -v[1], 0],
-    #                 [v[1], v[0], 0],
-    #                 [0, 0, 1],
-    #             ]
-    #         )
-    #         quat = r.as_quat()
-    #         # XYZW -> WXYZ order of elements
-    #         quat = quat[[3, 0, 1, 2]]
-
-    #         detection_score = float(sample_detection_scores[i])
-
-    #         box3d = Box3D(
-    #             sample_token=sample_token,
-    #             translation=list(translation),
-    #             size=list(size),
-    #             rotation=list(quat),
-    #             name=class_name,
-    #             score=detection_score,
-    #         )
-    #         pred_box3ds.append(box3d)
-
-    #     pred = [b.serialize() for b in pred_box3ds]
-    #     with open(os.path.join(model_out_dir, pred_json_file_name), "w") as f:
-    #         json.dump(pred, f)
-
-    # def test_epoch_end(self, outputs):
-    #     """from https://www.kaggle.com/pestipeti/pytorch-baseline-inference"""
-    #     # convert into world coordinates and compute offsets
-    #     for outputs, confidences, batch in outputs:
-    #         outputs = outputs.cpu().numpy()
-
-    #     sample_boxes = sample_boxes.reshape(-1, 2)  # (N, 4, 2) -> (N*4, 2)
-    #     sample_boxes = sample_boxes.transpose(1, 0)  # (N*4, 2) -> (2, N*4)
+        sub = pd.DataFrame(list(sub.items()))
+        sub.columns = sample_sub.columns
+        sub_csv_path = os.path.join(self.hparams.output_dir, CSV_NAME)
+        sub.to_csv(sub_csv_path, index=False)
+        print("save submission file on:", sub_csv_path)
 
     def configure_optimizers(self):
         if self.hparams.optim_name == "sgd":

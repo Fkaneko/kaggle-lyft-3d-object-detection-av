@@ -73,7 +73,7 @@ class Lyft3DdetSegDatamodule(pl.LightningDataModule):
                 val_target_paths,
                 transforms=self.val_transform(),
             )
-            self.plot_dataset(self.val_dataset)
+            self.plot_dataset(self.train_dataset)
 
         # Assign Test split(s) for use in Dataloaders
         if stage == "test" or stage is None:
@@ -87,6 +87,7 @@ class Lyft3DdetSegDatamodule(pl.LightningDataModule):
                 target_filepaths=None,
                 transforms=self.test_transform(),
             )
+            self.plot_dataset(self.test_dataset)
 
     def train_dataloader(self):
         return DataLoader(
