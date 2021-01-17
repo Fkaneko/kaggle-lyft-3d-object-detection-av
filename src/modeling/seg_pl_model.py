@@ -1,6 +1,6 @@
 import json
+import math
 import os
-from pathlib import Path
 from typing import List, Tuple, Union
 
 import cv2
@@ -22,6 +22,9 @@ from src.config.config import CLASS_LOSS_WEIGHTS, CLASSES, CSV_NAME
 from src.dataset.seg_datamodule import IMG_MEAN, IMG_STD
 
 
+import matplotlib.pyplot as plt
+
+
 class LitModel(pl.LightningModule):
     def __init__(
         self,
@@ -37,6 +40,7 @@ class LitModel(pl.LightningModule):
         optim_name: str = "adam",
         in_channels: int = 3,
         output_dir: str = "./",
+        is_debug: bool = False,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
@@ -55,6 +59,7 @@ class LitModel(pl.LightningModule):
         )
         # self.f1 = pl.metrics.F1(num_classes=len(CLASSES) + 1)
         self.f1 = pl.metrics.F1()
+        self.is_debug = is_debug
 
     def forward(self, x):
         x = self.model(x)
@@ -128,7 +133,9 @@ class LitModel(pl.LightningModule):
         ego_translation = batch["ego_translation"].cpu().numpy()
 
         pred_box3ds = []
+
         for i, raw_pred in enumerate(predictions):
+
             raw_pred = cv2.resize(
                 raw_pred,
                 dsize=(
@@ -150,7 +157,13 @@ class LitModel(pl.LightningModule):
                 sample_detection_scores,
                 sample_detection_classes,
             ) = calc_detection_box(predictions_opened, raw_pred, CLASSES)
-
+            if self.is_debug:
+                t = np.zeros_like(predictions_opened)
+                for sample_b in sample_boxes:
+                    box_pix = np.int0(sample_b)
+                    cv2.drawContours(t, [box_pix], 0, (255), 2)
+                plt.imshow(np.hstack([predictions_opened * 255, t]))
+                plt.show()
             # store the all boxes on the list
             (
                 sample_boxes,
@@ -171,6 +184,7 @@ class LitModel(pl.LightningModule):
                     sample_boxes_dimensions,
                     sample_detection_classes,
                     sample_detection_scores,
+                    is_debug=self.is_debug,
                 )
             )
         return pred_box3ds
@@ -190,6 +204,7 @@ class LitModel(pl.LightningModule):
         sub = {}
         for i in tqdm(range(len(pred_box3ds))):
             yaw = 2 * np.arccos(pred_box3ds[i].rotation[0])
+            yaw = math.copysign(yaw, pred_box3ds[i].rotation[-1])
             pred = " ".join(
                 [
                     str(pred_box3ds[i].score / 255),

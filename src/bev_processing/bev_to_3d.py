@@ -1,6 +1,7 @@
 from typing import List, Tuple
 
 import cv2
+from matplotlib import pyplot as plt
 import numpy as np
 from lyft_dataset_sdk.eval.detection.mAP_evaluation import Box3D
 from scipy.spatial.transform import Rotation as R
@@ -38,18 +39,20 @@ def calc_detection_box(
         ]
         sample_detection_classes.append(classes[max_class_index])
         sample_detection_scores.append(box_center_value)
+        # sample_boxes.append(np.array(box))
         sample_boxes.append(box)
 
     return sample_boxes, sample_detection_scores, sample_detection_classes
 
 
 def create_3d_boxes_from_2d(
-    sample_boxes,
-    sample_detection_classes,
-    ego_translation,
-    global_from_voxel,
+    sample_boxes: np.ndarray,
+    sample_detection_classes: List[float],
+    ego_translation: np.ndarray,
+    global_from_voxel: np.ndarray,
     box_scale: float = 0.8,
-):
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+
     # make json pred
     sample_boxes = sample_boxes.reshape(-1, 2)  # (N, 4, 2) -> (N*4, 2)
     sample_boxes = sample_boxes.transpose(1, 0)  # (N*4, 2) -> (2, N*4)
@@ -100,14 +103,16 @@ def create_3d_boxes_from_2d(
 
 
 def convert_into_nuscene_3dbox(
-    sample_token,
-    sample_boxes,
-    sample_boxes_centers,
-    sample_boxes_dimensions,
-    sample_detection_class,
-    sample_detection_scores,
-):
-    pred_box3ds = []
+    sample_token: str,
+    sample_boxes: np.ndarray,
+    sample_boxes_centers: np.ndarray,
+    sample_boxes_dimensions: np.ndarray,
+    sample_detection_class: List[str],
+    sample_detection_scores: List[float],
+    reverse_rot_direction: bool = False,
+    is_debug: bool = False,
+) -> List[Box3D]:
+    pred_box3ds: Box3D = []
     for i in range(len(sample_boxes)):
         translation = sample_boxes_centers[i]
         size = sample_boxes_dimensions[i]
@@ -116,7 +121,7 @@ def convert_into_nuscene_3dbox(
         # Determine the rotation of the box
         v = sample_boxes[i, 0] - sample_boxes[i, 1]  # (3, )
         v /= np.linalg.norm(v)
-        r = R.from_dcm(
+        r = R.from_matrix(
             [
                 [v[0], -v[1], 0],
                 [v[1], v[0], 0],
@@ -126,6 +131,8 @@ def convert_into_nuscene_3dbox(
         quat = r.as_quat()
         # XYZW -> WXYZ order of elements
         quat = quat[[3, 0, 1, 2]]
+        if reverse_rot_direction:
+            quat[-1] *= -1.0
 
         detection_score = float(sample_detection_scores[i])
 
@@ -138,6 +145,14 @@ def convert_into_nuscene_3dbox(
             score=detection_score,
         )
         pred_box3ds.append(box3d)
+        if is_debug:
+            after_ = list(box3d.ground_bbox_coords.exterior.coords)
+            x_ = [i[0] for i in after_]
+            y_ = [i[1] for i in after_]
+            plt.plot(x_, y_)
+            plt.plot(sample_boxes[i, :4, 0], sample_boxes[i, :4, 1])
+            plt.show()
+
     return pred_box3ds
 
     # pred = [b.serialize() for b in pred_box3ds]
