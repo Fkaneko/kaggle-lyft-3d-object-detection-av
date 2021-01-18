@@ -4,6 +4,7 @@ import os
 from typing import List, Tuple, Union
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
@@ -20,9 +21,6 @@ from src.bev_processing.bev_to_3d import (
 )
 from src.config.config import CLASS_LOSS_WEIGHTS, CLASSES, CSV_NAME
 from src.dataset.seg_datamodule import IMG_MEAN, IMG_STD
-
-
-import matplotlib.pyplot as plt
 
 
 class LitModel(pl.LightningModule):
