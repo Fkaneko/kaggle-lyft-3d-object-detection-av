@@ -4,11 +4,10 @@ import os
 from pathlib import Path
 from typing import List
 
-from lyft_3d_utils import SampleMeta
 from lyft_dataset_sdk.lyftdataset import LyftDataset
 from tqdm import tqdm
 
-from src.bev_processing.bev_utils import LyftBEVFolderConfiguration
+from src.bev_processing.bev_utils import LyftBEVFolderConfiguration, SampleMeta
 from src.bev_processing.points_to_bev import convert_scene_into_bev_images
 from src.config.config import DATSET_LINKS_DIR, GT_JSON_NAME, INPUT_META_JSON_NAME
 from src.evaluation.mAP_evaluation import Box3D
