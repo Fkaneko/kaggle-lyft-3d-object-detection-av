@@ -1,5 +1,4 @@
 import json
-
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -10,14 +9,9 @@ import pytorch_lightning as pl
 from omegaconf.omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
-from src.config.config import (
-    BEV_TRAIN_SUFFIX,
-    BEV_TARGET_SUFFIX,
-    INPUT_META_JSON_NAME,
-)
-
-from src.dataset.bev_dataset import BEVImageDataset
 from src.bev_processing.bev_utils import SampleMeta
+from src.config.config import BEV_TARGET_SUFFIX, BEV_TRAIN_SUFFIX, INPUT_META_JSON_NAME
+from src.dataset.bev_dataset import BEVImageDataset
 
 IMG_MEAN = (0.485, 0.456, 0.406)
 IMG_STD = (0.229, 0.224, 0.225)

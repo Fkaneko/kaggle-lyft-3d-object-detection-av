@@ -2,8 +2,8 @@
 # coding: utf-8
 import argparse
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
@@ -11,7 +11,7 @@ import pytorch_lightning as pl
 from src.config.config import SEED
 from src.dataset.seg_datamodule import Lyft3DdetSegDatamodule
 from src.modeling.seg_pl_model import LitModel
-from src.utils.util import set_random_seed, print_argparse_arguments
+from src.utils.util import print_argparse_arguments, set_random_seed
 
 
 def main(args: argparse.Namespace) -> None:

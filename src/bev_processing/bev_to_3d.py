@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from lyft_dataset_sdk.eval.detection.mAP_evaluation import Box3D
 from matplotlib import pyplot as plt
-from scipy.spatial.transform import Rotation as R
+from scipy.spatial.transform import Rotation
 
 from src.bev_processing.bev_utils import transform_points
 from src.config.config import CLASS_AVG_HEIGHTS, CLASSES
@@ -121,7 +121,7 @@ def convert_into_nuscene_3dbox(
         # Determine the rotation of the box
         v = sample_boxes[i, 0] - sample_boxes[i, 1]  # (3, )
         v /= np.linalg.norm(v)
-        r = R.from_matrix(
+        r = Rotation.from_matrix(
             [
                 [v[0], -v[1], 0],
                 [v[1], v[0], 0],
