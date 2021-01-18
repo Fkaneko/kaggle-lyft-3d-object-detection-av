@@ -1,13 +1,13 @@
 from typing import List, Tuple
 
 import cv2
-from matplotlib import pyplot as plt
 import numpy as np
 from lyft_dataset_sdk.eval.detection.mAP_evaluation import Box3D
+from matplotlib import pyplot as plt
 from scipy.spatial.transform import Rotation as R
 
-from make_image import transform_points
-from src.config.config import CLASSES, CLASS_AVG_HEIGHTS
+from src.bev_processing.bev_utils import transform_points
+from src.config.config import CLASS_AVG_HEIGHTS, CLASSES
 
 
 def calc_detection_box(
@@ -47,7 +47,7 @@ def calc_detection_box(
 
 def create_3d_boxes_from_2d(
     sample_boxes: np.ndarray,
-    sample_detection_classes: List[float],
+    sample_detection_classes: List[str],
     ego_translation: np.ndarray,
     global_from_voxel: np.ndarray,
     box_scale: float = 0.8,
@@ -154,7 +154,3 @@ def convert_into_nuscene_3dbox(
             plt.show()
 
     return pred_box3ds
-
-    # pred = [b.serialize() for b in pred_box3ds]
-    # with open(os.path.join(model_out_dir, pred_json_file_name), "w") as f:
-    #     json.dump(pred, f)

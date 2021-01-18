@@ -8,6 +8,8 @@ from typing import Union
 import numpy as np
 from omegaconf import OmegaConf
 
+from src.config.config import DATSET_LINKS_DIR
+
 
 def set_random_seed(seed: int = 42) -> None:
     os.environ["PYTHONHASHSEED"] = str(seed)
@@ -62,3 +64,14 @@ def make_version_folder(output_dir: Path, ver_prefix: str = "version_") -> Path:
     version_dir = output_dir / Path(ver_prefix + str(version_cnt))
     version_dir.mkdir()
     return version_dir
+
+
+def make_dataset_links(dataset_root: Path, data_suffix: str) -> None:
+    Path(DATSET_LINKS_DIR, data_suffix).mkdir(parents=True, exist_ok=True)
+    folder_types = ("images", "maps", "lidar")
+    for type_ in folder_types:
+        target_folder = dataset_root / Path(data_suffix + "_" + type_)
+        symbol_file = Path(DATSET_LINKS_DIR, data_suffix, type_)
+        if symbol_file.is_symlink():
+            continue
+        symbol_file.symlink_to(target_folder, target_is_directory=True)
