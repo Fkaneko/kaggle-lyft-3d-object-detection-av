@@ -56,7 +56,7 @@ def main(args):
     map_mask = level5data.map[0]["mask"]
 
     for data_folder, df in df_and_folder_list:
-        print("Generating bev from lidar 3d points into {}".format(data_folder))
+        print("Generating BEV images from lidar 3d points on {}".format(data_folder))
         first_samples = df.first_sample_token.values
         hosts = df.host.values
         sample_meta: List[SampleMeta] = []
