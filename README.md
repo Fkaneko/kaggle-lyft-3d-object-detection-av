@@ -15,13 +15,15 @@ For more details about this dataset please refer to [the lyft page](https://gith
 
 ### Training scheme: 2d segmentation with BEV.
 In this repo, [the baseline](https://www.kaggle.com/gzuidhof/reference-model) is re-implemented.
- At this baseline each 3d lidar scan is converted into simple BEV, Bird Eye of View image, like below.
- Along z axis lidar 3d point space is split into 3 bins and each bin mapped into channel axis of normal 2d image.
- x-y plane gird become pixel of BEV image.
- The target 3d bounding box is also cast into BEV as 2d mask and training is conducted as 2d segmentation.
- After the training 2d predicted mask will cast back to 3d bounding box.
+ At this baseline each 3d lidar scan is converted into simple BEV, Bird Eye View image, like below.
 
 ![bev_explain](./visualization/bev_multi_explain.png)
+
+ Along z axis lidar 3d point space is split into 3 bins and each bin mapped into channel axis of normal 2d image.
+ x-y plane gird become pixel for BEV image, left figure below.
+ The target 3d bounding box is also cast into BEV as 2d mask, right figure below, and training is conducted as 2d segmentation.
+ After the training 2d predicted mask will cast back to 3d bounding box.
+
 ![input bev image 0](./visualization/1f4e69ac22afb4d41b2893ab6ccf74f148b99dd747240f074663c44efe9eec59_input_0.png)
 ![input bev image 1](./visualization/1f4e69ac22afb4d41b2893ab6ccf74f148b99dd747240f074663c44efe9eec59_target.png)
 
