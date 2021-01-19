@@ -122,6 +122,14 @@ You can check [11.377 result with my full test pipeline and trained weight at ka
 **[Note]** The backbone difference is not a matter, within top-10 solution a single resnet18 reaches score < 10.0.
 But smaller model tends to be better for this task. -->
 
+### Results
+
+| model      | backbone    | x-y grid size | x-y range |  test score |
+| -          | -           | -      | -    | -        |
+| baseline   | effb1    | 0.4m x 0.4m  | [-67.2mm, 67.2mm] |  0.032|
+| baseline   | effb2    | 0.4m x 0.4m  | [-67.2mm, 67.2mm] |  0.033|
+| baseline   | ResNeSt50    | 0.4m x 0.4m  | [-67.2mm, 67.2mm] |  0.036|
+
 ### Prediction Visualization
 
 Prediction visualization with this baseline re-implementation model, test score(mAP)=0.032.
