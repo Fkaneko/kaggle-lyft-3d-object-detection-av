@@ -36,7 +36,7 @@ class Lyft3DdetSegDatamodule(pl.LightningDataModule):
         self.is_debug = is_debug
         self.use_map = use_map
         self.val_hosts = self.get_val_hosts(val_hosts)
-        self.input_size = 320
+        # self.input_size = 320
 
     def prepare_data(self):
         # check
@@ -46,6 +46,7 @@ class Lyft3DdetSegDatamodule(pl.LightningDataModule):
         # Assign Train/val split(s) for use in Dataloaders
         self.bev_config = OmegaConf.load(Path(self.bev_data_dir, "config.yaml"))
         self.bev_config.bev_data_dir = str(self.bev_data_dir)
+        self._get_network_input_size()
 
         if stage == "fit" or stage is None:
             prefix = "train"
@@ -128,6 +129,22 @@ class Lyft3DdetSegDatamodule(pl.LightningDataModule):
         else:
             print(f"unexpected val_choice:{val_choice}, so the default will be used")
             return ("host-a007", "host-a008", "host-a009")
+
+    def _get_network_input_size(self, min_size_ind: int = 4) -> None:
+
+        i = min_size_ind
+
+        def _network_input_size(ind: int) -> int:
+            return 2 ** 5 * ind
+
+        while _network_input_size(i + 1) <= self.bev_config.image_size:
+            i += 1
+        self.input_size = _network_input_size(i)
+        print(
+            "for 2d segmentation, bev image input size: {} -> {}".format(
+                self.bev_config.image_size, self.input_size
+            )
+        )
 
     def _load_meta_json(self, prefix: str = "train") -> List[SampleMeta]:
         json_path = Path(self.bev_data_dir, prefix + "_images", INPUT_META_JSON_NAME)
