@@ -114,13 +114,13 @@ if __name__ == "__main__":
         default="adam",
         help="optimizer name",
     )
-    parser.add_argument("--lr", default=3.0e-3, type=float, help="learning rate")
+    parser.add_argument("--lr", default=1.0e-2, type=float, help="learning rate")
     parser.add_argument("--batch_size", type=int, default=96, help="batch size")
     parser.add_argument("--epochs", type=int, default=50, help="epochs for training")
     parser.add_argument(
         "--backbone_name",
-        choices=["efficientnet-b1", "seresnext26d_32x4d"],
-        default="efficientnet-b1",
+        choices=["efficientnet-b1", "efficientnet-b2", "timm-resnest50d"],
+        default="efficientnet-b2",
         help="backbone name",
     )
     parser.add_argument("--is_test", action="store_true", help="test mode")
