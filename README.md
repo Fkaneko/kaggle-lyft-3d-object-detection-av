@@ -123,6 +123,7 @@ You can check [11.377 result with my full test pipeline and trained weight at ka
 But smaller model tends to be better for this task. -->
 
 ### Results
+
 | model      | backbone    | x-y grid size | x-y range |  test score |
 | -          | -           | -      | -    | -        | -  |
 | baseline   | effb1    | 0.4m x 0.4m  | [-67.2mm, 67.2mm] |  0.032|
