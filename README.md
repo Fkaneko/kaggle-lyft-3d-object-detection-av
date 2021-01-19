@@ -125,7 +125,7 @@ But smaller model tends to be better for this task. -->
 ### Results
 
 | model      | backbone    | x-y grid size | x-y range |  test score |
-| -          | -           | -      | -    | -        | -  |
+| -          | -           | -      | -    | -        |
 | baseline   | effb1    | 0.4m x 0.4m  | [-67.2mm, 67.2mm] |  0.032|
 | baseline   | effb2    | 0.4m x 0.4m  | [-67.2mm, 67.2mm] |  0.033|
 | baseline   | ResNeSt50    | 0.4m x 0.4m  | [-67.2mm, 67.2mm] |  0.036|
