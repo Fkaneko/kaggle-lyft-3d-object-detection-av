@@ -39,6 +39,7 @@ class LitModel(pl.LightningModule):
         in_channels: int = 3,
         output_dir: str = "./",
         is_debug: bool = False,
+        background_threshold: int = 200,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
@@ -50,7 +51,7 @@ class LitModel(pl.LightningModule):
         )
         self.criterion = torch.nn.CrossEntropyLoss(torch.tensor(class_weights))
 
-        self.background_threshold = 200
+        self.background_threshold = background_threshold
         self.morph_kernel_size = 3
         self.kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE, (self.morph_kernel_size, self.morph_kernel_size)

@@ -35,7 +35,9 @@ def main(args: argparse.Namespace) -> None:
         print("\t\t ==== TEST MODE ====")
         print("load from: ", args.ckpt_path)
         model = LitModel.load_from_checkpoint(
-            args.ckpt_path, output_dir=str(Path(args.ckpt_path).parent)
+            args.ckpt_path,
+            output_dir=str(Path(args.ckpt_path).parent),
+            background_threshold=args.background_threshold,
         )
         trainer = pl.Trainer(gpus=len(args.visible_gpus.split(",")))
 
@@ -119,7 +121,12 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=50, help="epochs for training")
     parser.add_argument(
         "--backbone_name",
-        choices=["efficientnet-b1", "efficientnet-b2", "timm-resnest50d"],
+        choices=[
+            "efficientnet-b1",
+            "efficientnet-b2",
+            "timm-resnest50d",
+            "timm-resnest269e",
+        ],
         default="efficientnet-b2",
         help="backbone name",
     )
@@ -153,6 +160,12 @@ if __name__ == "__main__":
         choices=[0, 1],
         type=int,
         help="augmentation mode",
+    )
+    parser.add_argument(
+        "--background_threshold",
+        default=200,
+        type=int,
+        help="background threshold for 2d predicted mask, only used at test mode",
     )
     parser.add_argument(
         "--visible_gpus",
