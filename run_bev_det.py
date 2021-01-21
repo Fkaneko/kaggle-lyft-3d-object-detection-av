@@ -80,6 +80,7 @@ def main(args: argparse.Namespace) -> None:
         )
         pl.trainer.seed_everything(seed=SEED)
         trainer = pl.Trainer(
+            resume_from_checkpoint=args.resume_from_checkpoint,
             gpus=len(args.visible_gpus.split(",")),
             max_epochs=args.epochs,
             precision=args.precision,
@@ -127,7 +128,7 @@ if __name__ == "__main__":
             "timm-resnest50d",
             "timm-resnest269e",
         ],
-        default="efficientnet-b2",
+        default="timm-resnest50d",
         help="backbone name",
     )
     parser.add_argument("--is_test", action="store_true", help="test mode")
@@ -172,6 +173,12 @@ if __name__ == "__main__":
         type=str,
         default="0",
         help="Select gpu ids with comma separated format",
+    )
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default=None,
+        help="resume training from a specific checkpoint path",
     )
     parser.add_argument(
         "--find_lr",
