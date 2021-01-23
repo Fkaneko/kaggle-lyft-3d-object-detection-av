@@ -37,8 +37,17 @@ def main(args: argparse.Namespace) -> None:
         model = LitModel.load_from_checkpoint(
             args.ckpt_path,
             output_dir=str(Path(args.ckpt_path).parent),
+            flip_tta=args.flip_tta,
             background_threshold=args.background_threshold,
         )
+        # Check the image resolution. Train and test bev resolution should be the same.
+        assert model.hparams.bev_config.voxel_size_xy == det_dm.bev_config.voxel_size_xy
+        assert model.hparams.bev_config.voxel_size_z == det_dm.bev_config.voxel_size_z
+        assert model.hparams.bev_config.box_scale == det_dm.bev_config.box_scale
+
+        # Image size can be different between training and test.
+        model.hparams.bev_config.image_size = det_dm.bev_config.image_size
+
         trainer = pl.Trainer(gpus=len(args.visible_gpus.split(",")))
 
         if args.test_with_val:
@@ -140,6 +149,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--test_with_val", action="store_true", help="test mode with validation data"
+    )
+    parser.add_argument(
+        "--flip_tta", action="store_true", help="test time augmentation h/vflip"
     )
     parser.add_argument(
         "--precision",
