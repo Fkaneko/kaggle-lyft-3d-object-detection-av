@@ -10,6 +10,7 @@ import pandas as pd
 import pytorch_lightning as pl
 import segmentation_models_pytorch as smp
 import torch
+import torchvision
 from omegaconf.dictconfig import DictConfig
 from omegaconf.listconfig import ListConfig
 from tqdm import tqdm
@@ -38,7 +39,9 @@ class LitModel(pl.LightningModule):
         optim_name: str = "adam",
         in_channels: int = 3,
         output_dir: str = "./",
+        flip_tta: bool = False,
         is_debug: bool = False,
+        background_threshold: int = 200,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
@@ -50,7 +53,7 @@ class LitModel(pl.LightningModule):
         )
         self.criterion = torch.nn.CrossEntropyLoss(torch.tensor(class_weights))
 
-        self.background_threshold = 200
+        self.background_threshold = background_threshold
         self.morph_kernel_size = 3
         self.kernel = cv2.getStructuringElement(
             cv2.MORPH_ELLIPSE, (self.morph_kernel_size, self.morph_kernel_size)
@@ -58,6 +61,14 @@ class LitModel(pl.LightningModule):
         # self.f1 = pl.metrics.F1(num_classes=len(CLASSES) + 1)
         self.f1 = pl.metrics.F1()
         self.is_debug = is_debug
+
+        if flip_tta:
+            self.flip_tta = [
+                torchvision.transforms.functional.hflip,
+                torchvision.transforms.functional.vflip,
+            ]
+        else:
+            self.flip_tta = []
 
     def forward(self, x):
         x = self.model(x)
@@ -122,8 +133,17 @@ class LitModel(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         inputs = batch["image"]
         outputs = self.model(inputs)
-
         outputs = outputs.softmax(dim=1)
+        if len(self.flip_tta) > 0:
+            for flip_trans in self.flip_tta:
+                tta_inputs = flip_trans(inputs)
+                tta_outputs = self.model(tta_inputs)
+                tta_outputs = tta_outputs.softmax(dim=1)
+                outputs += flip_trans(tta_outputs)
+            outputs *= torch.tensor(
+                1.0 / (len(self.flip_tta) + 1.0), device=self.device
+            )
+
         predictions = np.round(outputs.cpu().numpy() * 255).astype(np.uint8)
         predictions = np.transpose(predictions, (0, 2, 3, 1))
 

@@ -30,17 +30,27 @@ def main(args: argparse.Namespace) -> None:
     )
 
     det_dm.prepare_data()
-    det_dm.setup(stage="test" if args.is_test else "fit")
     if args.is_test:
+        det_dm.setup(stage="test" if not args.test_with_val else "fit")
         print("\t\t ==== TEST MODE ====")
         print("load from: ", args.ckpt_path)
         model = LitModel.load_from_checkpoint(
-            args.ckpt_path, output_dir=str(Path(args.ckpt_path).parent)
+            args.ckpt_path,
+            output_dir=str(Path(args.ckpt_path).parent),
+            flip_tta=args.flip_tta,
+            background_threshold=args.background_threshold,
         )
+        # Check the image resolution. Train and test bev resolution should be the same.
+        assert model.hparams.bev_config.voxel_size_xy == det_dm.bev_config.voxel_size_xy
+        assert model.hparams.bev_config.voxel_size_z == det_dm.bev_config.voxel_size_z
+        assert model.hparams.bev_config.box_scale == det_dm.bev_config.box_scale
+
+        # Image size can be different between training and test.
+        model.hparams.bev_config.image_size = det_dm.bev_config.image_size
+
         trainer = pl.Trainer(gpus=len(args.visible_gpus.split(",")))
 
         if args.test_with_val:
-            det_dm.setup(stage="fit")
             trainer.test(model, test_dataloaders=det_dm.val_dataloader())
         else:
             trainer.test(model, datamodule=det_dm)
@@ -78,6 +88,7 @@ def main(args: argparse.Namespace) -> None:
         )
         pl.trainer.seed_everything(seed=SEED)
         trainer = pl.Trainer(
+            resume_from_checkpoint=args.resume_from_checkpoint,
             gpus=len(args.visible_gpus.split(",")),
             max_epochs=args.epochs,
             precision=args.precision,
@@ -119,8 +130,13 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=50, help="epochs for training")
     parser.add_argument(
         "--backbone_name",
-        choices=["efficientnet-b1", "efficientnet-b2", "timm-resnest50d"],
-        default="efficientnet-b2",
+        choices=[
+            "efficientnet-b1",
+            "efficientnet-b2",
+            "timm-resnest50d",
+            "timm-resnest269e",
+        ],
+        default="timm-resnest50d",
         help="backbone name",
     )
     parser.add_argument("--is_test", action="store_true", help="test mode")
@@ -132,6 +148,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--test_with_val", action="store_true", help="test mode with validation data"
+    )
+    parser.add_argument(
+        "--flip_tta", action="store_true", help="test time augmentation h/vflip"
     )
     parser.add_argument(
         "--precision",
@@ -155,10 +174,22 @@ if __name__ == "__main__":
         help="augmentation mode",
     )
     parser.add_argument(
+        "--background_threshold",
+        default=200,
+        type=int,
+        help="background threshold for 2d predicted mask, only used at test mode",
+    )
+    parser.add_argument(
         "--visible_gpus",
         type=str,
         default="0",
         help="Select gpu ids with comma separated format",
+    )
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default=None,
+        help="resume training from a specific checkpoint path",
     )
     parser.add_argument(
         "--find_lr",

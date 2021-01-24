@@ -13,14 +13,15 @@ The target is 3d object detection with the input of 3d lidar points.
 This visualization is from https://www.kaggle.com/rishabhiitbhu/visualizing-predictions#3D-Interactive-visualization.
 For more details about this dataset please refer to [the lyft page](https://github.com/lyft/nuscenes-devkit)
 
-### Training scheme: 2d segmentation with BEV.
+### Training scheme: fixed 3d to 2d BEV encoder and 2d segmentation with BEV.
 In this repo, [the baseline](https://www.kaggle.com/gzuidhof/reference-model) is re-implemented.
- At this baseline each 3d lidar scan is converted into simple BEV, Bird Eye View image, like below.
+ At this baseline each 3d lidar scan is converted into a simple BEV, Bird Eye View, image like below.
 
 ![bev_explain](./visualization/bev_multi_explain.png)
 
- Along z axis lidar 3d point space is split into 3 bins and each bin mapped into channel axis of normal 2d image.
+ Along z axis lidar 3d point space is split into 3 bins for 2d image channel.
  x-y plane gird become pixel for BEV image, left figure below.
+ And the number of points in each bin become intensity for a BEV image.
  The target 3d bounding box is also cast into BEV as 2d mask, right figure below, and training is conducted as 2d segmentation.
  After the training 2d predicted mask will cast back to 3d bounding box.
 
@@ -124,21 +125,30 @@ But smaller model tends to be better for this task. -->
 
 ### Results
 
-| model      | backbone    | x-y grid size | x-y range |  test score |
-| -          | -           | -      | -    | -        |
-| baseline   | effb1    | 0.4m x 0.4m  | [-67.2mm, 67.2mm] |  0.032|
-| baseline   | effb2    | 0.4m x 0.4m  | [-67.2mm, 67.2mm] |  0.033|
-| baseline   | ResNeSt50    | 0.4m x 0.4m  | [-67.2mm, 67.2mm] |  0.036|
+| model    | backbone   | x-y grid size | x-y range         | background thres | h/vflip @ test time | test score |
+| -        | -          | -             | -                 | -                | -                   | -          |
+| baseline | effb1      | 0.4m x 0.4m   | [-67.2mm, 67.2mm] | 200              | False               | 0.032      |
+| baseline | effb2      | 0.4m x 0.4m   | [-67.2mm, 67.2mm] | 200              | False               | 0.033      |
+| baseline | ResNeSt50  | 0.4m x 0.4m   | [-67.2mm, 67.2mm] | 200              | False               | 0.036      |
+| baseline | ResNeSt50  | 0.4m x 0.4m   | [-64.0mm, 64.0mm] | 125              | False               | 0.030      |
+| baseline | ResNeSt50  | 0.2m x 0.2m   | [-64.0mm, 64.0mm] | 200              | False               | 0.053      |
+| baseline | ResNeSt269 | 0.2m x 0.2m   | [-64.0mm, 64.0mm] | 200              | False               | 0.055      |
+| baseline | ResNeSt269 | 0.2m x 0.2m   | [-64.0mm, 64.0mm] | 200              | True                | 0.057      |
 
 ### Prediction Visualization
 
-Prediction visualization with this baseline re-implementation model, test score(mAP)=0.032.
+Prediction visualization with this baseline re-implementation model, test score(mAP)=0.032 and 0.057.
 The orange line is ground truth and green line is prediction.
-This model uses really simple 2d segmentation but the model roughly handles
+This model uses really simple fixed 3d encoder but the model seems to understand basic feature of
 the 3d detection.
 
+#### Prediction, Test mAP 0.032
 ![input image 0](./visualization/lidar_top_pred.png)
 ![input image 1](./visualization/lidar_iso_pred_by_ploty.png)
+
+#### Prediction, Test mAP 0.057
+![input image 0](./visualization/lidar_top_pred_tuned.png)
+![input image 1](./visualization/lidar_iso_pred_tuned_by_ploty.png)
 ## License
 #### Code
 Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
