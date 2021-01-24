@@ -30,8 +30,8 @@ def main(args: argparse.Namespace) -> None:
     )
 
     det_dm.prepare_data()
-    det_dm.setup(stage="test" if args.is_test else "fit")
     if args.is_test:
+        det_dm.setup(stage="test" if not args.test_with_val else "fit")
         print("\t\t ==== TEST MODE ====")
         print("load from: ", args.ckpt_path)
         model = LitModel.load_from_checkpoint(
@@ -51,7 +51,6 @@ def main(args: argparse.Namespace) -> None:
         trainer = pl.Trainer(gpus=len(args.visible_gpus.split(",")))
 
         if args.test_with_val:
-            det_dm.setup(stage="fit")
             trainer.test(model, test_dataloaders=det_dm.val_dataloader())
         else:
             trainer.test(model, datamodule=det_dm)
