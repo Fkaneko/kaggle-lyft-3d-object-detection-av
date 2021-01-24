@@ -133,13 +133,17 @@ class LitModel(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         inputs = batch["image"]
         outputs = self.model(inputs)
+        outputs = outputs.softmax(dim=1)
         if len(self.flip_tta) > 0:
             for flip_trans in self.flip_tta:
                 tta_inputs = flip_trans(inputs)
                 tta_outputs = self.model(tta_inputs)
+                tta_outputs = tta_outputs.softmax(dim=1)
                 outputs += flip_trans(tta_outputs)
+            outputs *= torch.tensor(
+                1.0 / (len(self.flip_tta) + 1.0), device=self.device
+            )
 
-        outputs = outputs.softmax(dim=1)
         predictions = np.round(outputs.cpu().numpy() * 255).astype(np.uint8)
         predictions = np.transpose(predictions, (0, 2, 3, 1))
 
