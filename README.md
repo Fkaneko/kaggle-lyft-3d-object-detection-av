@@ -160,3 +160,86 @@ Please check, https://self-driving.lyft.com/level5/perception/
 * [Nine simple steps for better-looking python code](https://towardsdatascience.com/nine-simple-steps-for-better-looking-python-code-87e5d9d3b1cf).
 * For the dataset, [lyft_dataset_sdk](https://github.com/lyft/nuscenes-devkit)
 * Leaderboard, [kaggle competition page](https://www.kaggle.com/c/3d-object-detection-for-autonomous-vehicles/leaderboard)
+
+## Appendix
+### Train and Test data structure
+```
+train
+├── maps:1
+├── category:9
+├── sensor:10
+├── attribute:18
+├── calibrated_sensor:148
+├── instance:18421
+├── log:180
+└── scenes:148 (73%)
+|       └── sample:126
+|               ├── timestamp:1 for sample
+|               ├── sample_annotation:28.14 average
+|               └── sample_data:10
+|                       ├── images:7
+|                       |        ├── ego_pose_token:1 for 7 images 7 tokens
+|                       |        ├── timestamp:1 for 7 images 7 tokens
+|                       |        ├── CAM FRONT 1224x1020
+|                       |        ├── CAM FRONT LEFT 1224x1020
+|                       |        ├── CAM FRONT RIGHT1 1224x1020
+|                       |        ├── CAM FRONT ZOOMED 2048x864
+|                       |        ├── CAM BACK 1224x1020
+|                       |        ├── CAM BACK LEFT 1224x1020
+|                       |        └── CAM BACK LEFT 1224x1020
+|                       └── lidar:1
+|                                ├── ego_pose_token:1 for 1 lidars 1 token
+|                                ├── timestamp:1 for 1 lidars 1 token
+|                                └── LIDAR TOP
+└── scenes:32 (17%)
+        └── sample:126
+                ├── timestamp:1 for sample
+                ├── sample_annotation:28.14 average
+                └── sample_data:10
+                        ├── images:7
+                        |      ├── ego_pose_token:for 7 images 7 tokens(?%), for 7 images 1 token
+                        |      ├── timestamp:for 7 images 7 tokens(50%), for FRONT and FRONT_LEFT 1
+                        |      ├── CAM FRONT 1920x1080
+                        |      ├── CAM FRONT LEFT 1920x1080
+                        |      ├── CAM FRONT RIGHT1 1920x1080
+                        |      ├── CAM FRONT ZOOMED 1920x1080
+                        |      ├── CAM BACK 1920x1080
+                        |      ├── CAM BACK LEFT 1920x1080
+                        |      └── CAM BACK LEFT 1920x1080
+                        └── lidar:3
+                                 ├── ego_pose_token:1 for 3 lidars 1 token
+                                 ├── timestamp:1 for 3 lidars 1 token
+                                 ├── LIDAR TOP
+                                 ├── LIDAR FRONT LEFT
+                                 └── LIDAR FRONT RIGHT
+```
+```
+test
+├── maps:1
+├── category:9
+├── sensor:10
+├── attribute:17 cannot be used due to instance empty
+├── calibrated_sensor:168
+├── instance:empty
+├── log:218
+└── scenes:218
+        └── sample:126
+                ├── timestamp:1 for sample
+                ├── sample_annotation:28.14 average
+                └── sample_data:8
+                        ├── images:7
+                        |        ├── ego_pose:1 for each image
+                        |        ├── timestamp:1 for each image
+                        |        ├── CAM FRONT 1224x1020
+                        |        ├── CAM FRONT 1224x1020
+                        |        ├── CAM FRONT RIGHT 1224x1020
+                        |        ├── CAM FRONT ZOOMED 2048x864
+                        |        ├── CAM BACK 1224x1020
+                        |        ├── CAM BACK LEFT 1224x1020
+                        |        └── CAM BACK LEFT 1224x1020
+                        └── lidar:1
+                                 ├── ego_pose:1 for each image
+                                 ├── timestamp:1 for each image
+                                 └── LIDAR TOP
+```
+* 3 lidars: 38 scenes [  0,   4,   6,  12,  25,  30,  32,  41,  45,  46,  48,  61,  70, 76,  79,  80,  83,  84,  87, 104, 108, 114, 120, 130, 134, 141, 142, 146, 153, 174, 175, 176]
